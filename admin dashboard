@@ -1,0 +1,266 @@
+import { useState, useEffect } from 'react';
+import { db } from '../../firebase/config';
+import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
+import { useSchoolYear } from '../../contexts/SchoolYearContext';
+import { ALL_LEVELS } from '../../utils/helpers';
+
+const AdminDashboard = () => {
+  const { currentSY, selectedSY, setSelectedSY, schoolYears } = useSchoolYear();
+  const [stats, setStats] = useState({
+    totalStudents: 0,
+    totalTeachers: 0,
+    activeStudents: 0,
+    activeTeachers: 0,
+  });
+  const [studentsByLevel, setStudentsByLevel] = useState({});
+  const [pinRequestCount, setPinRequestCount] = useState(0);
+  const [announcements, setAnnouncements] = useState([]);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const studentsSnap = await getDocs(query(
+          collection(db, 'users'),
+          where('role', '==', 'student'),
+          where('schoolYear', '==', selectedSY)
+        ));
+        const teachersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'teacher')));
+        const activeStudents = studentsSnap.docs.filter(d => d.data().status === 'active').length;
+        const activeTeachers = teachersSnap.docs.filter(d => d.data().status === 'active').length;
+        setStats({
+          totalStudents: studentsSnap.size,
+          totalTeachers: teachersSnap.size,
+          activeStudents,
+          activeTeachers,
+        });
+
+        // Count students by level
+        const levelCounts = {};
+        ALL_LEVELS.forEach(level => {
+          levelCounts[level] = 0;
+        });
+        studentsSnap.docs.forEach(doc => {
+          const level = doc.data().level;
+          if (level && levelCounts.hasOwnProperty(level)) {
+            levelCounts[level]++;
+          }
+        });
+        setStudentsByLevel(levelCounts);
+      } catch (err) {
+        console.error('Error fetching stats:', err);
+      }
+    };
+
+    const fetchPinRequests = async () => {
+      try {
+        const snapshot = await getDocs(query(
+          collection(db, 'pinRequests'),
+          where('status', '==', 'pending')
+        ));
+        setPinRequestCount(snapshot.size);
+      } catch (err) {
+        console.error('Error fetching PIN requests:', err);
+      }
+    };
+
+    const fetchAnnouncements = async () => {
+      if (!selectedSY) return;
+      try {
+        const snapshot = await getDocs(query(
+          collection(db, 'announcements'),
+          where('schoolYear', '==', selectedSY),
+          orderBy('createdAt', 'desc')
+        ));
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAnnouncements(data);
+      } catch (err) {
+        console.error('Error fetching announcements:', err);
+      }
+    };
+
+    if (selectedSY) fetchStats();
+    fetchPinRequests();
+    fetchAnnouncements();
+  }, [selectedSY]);
+
+  return (
+    <div>
+      <div className="page-header">
+        <h1>Admin Dashboard</h1>
+        <p>Welcome to ISPSC LHS Student Portal - Tagudin, Ilocos Sur</p>
+      </div>
+
+      {/* School Year Selector */}
+      <div className="card" style={{ borderLeft: '4px solid #2f855a', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '28px' }}>📅</span>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '18px', color: '#2f855a' }}>
+                School Year: {selectedSY}
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: '13px', color: '#718096' }}>
+                {selectedSY === currentSY ? '(Current Active Year)' : '(Viewing Archived Year)'}
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <select
+              value={selectedSY}
+              onChange={e => setSelectedSY(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '8px', border: '2px solid #e2e8f0', fontSize: '14px' }}
+            >
+              {schoolYears.map(sy => (
+                <option key={sy.id} value={sy.name}>
+                  {sy.name} {sy.status === 'active' ? '(Active)' : ''}
+                </option>
+              ))}
+            </select>
+            <a href="/admin/school-year" className="btn btn-outline" style={{ textDecoration: 'none', fontSize: '13px' }}>
+              ⚙️ Manage
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div className="stats-grid">
+        <div className="stat-card">
+          <div className="stat-icon blue">👨‍🎓</div>
+          <div className="stat-info">
+            <h3>{stats.totalStudents}</h3>
+            <p>Total Students</p>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon green">👨‍🏫</div>
+          <div className="stat-info">
+            <h3>{stats.totalTeachers}</h3>
+            <p>Total Teachers</p>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon gold">✅</div>
+          <div className="stat-info">
+            <h3>{stats.activeStudents}</h3>
+            <p>Active Students</p>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon purple">📋</div>
+          <div className="stat-info">
+            <h3>{stats.activeTeachers}</h3>
+            <p>Active Teachers</p>
+          </div>
+        </div>
+      </div>
+
+      {/* PIN Request Notification */}
+      {pinRequestCount > 0 && (
+        <div className="card" style={{ borderLeft: '4px solid #e53e3e', marginBottom: '20px', background: '#fffff0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '28px' }}>📨</span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '16px', color: '#c53030' }}>
+                  {pinRequestCount} Pending PIN Request{pinRequestCount !== 1 ? 's' : ''}
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: '13px', color: '#718096' }}>
+                  Students are requesting their forgotten PINs
+                </p>
+              </div>
+            </div>
+            <a href="/admin/pin-recovery" className="btn btn-primary" style={{ textDecoration: 'none', fontSize: '13px' }}>
+              📧 Review & Send PINs
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Students by Grade Level */}
+      <div className="card" style={{ marginBottom: '20px' }}>
+        <h2 style={{ margin: '0 0 16px', fontSize: '16px', color: '#1a4d2e' }}>Students by Grade Level</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px' }}>
+          {ALL_LEVELS.map(level => (
+            <div key={level} style={{
+              padding: '16px',
+              borderRadius: '10px',
+              border: '2px solid #e2e8f0',
+              background: '#f7fafc',
+              textAlign: 'center',
+              transition: 'all 0.2s'
+            }}>
+              <div style={{ fontSize: '24px', fontWeight: 700, color: '#2d3748', marginBottom: '4px' }}>
+                {studentsByLevel[level] || 0}
+              </div>
+              <div style={{ fontSize: '12px', color: '#718096', fontWeight: 600 }}>
+                {level}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {announcements.length > 0 && (
+        <div className="card" style={{ marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <h2 style={{ margin: 0, fontSize: '16px', color: '#1a4d2e' }}>Latest Announcements</h2>
+            <a href="/admin/announcements" className="btn btn-outline" style={{ textDecoration: 'none', fontSize: '13px' }}>
+              Manage Announcements
+            </a>
+          </div>
+          <div style={{ padding: '16px' }}>
+            {announcements.slice(0, 3).map(announcement => (
+              <div key={announcement.id} style={{ padding: '12px 0', borderBottom: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+                  <div>
+                    <h3 style={{ margin: '0 0 6px', fontSize: '15px' }}>{announcement.title}</h3>
+                    <p style={{ margin: 0, color: '#4a5568', whiteSpace: 'pre-line' }}>{announcement.message}</p>
+                    <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#718096' }}>Posted by {announcement.postedBy} · {new Date(announcement.createdAt).toLocaleString()}</p>
+                  </div>
+                </div>
+                {announcement.imageUrl && (
+                  <img src={announcement.imageUrl} alt={announcement.title} style={{ marginTop: '12px', maxWidth: '100%', borderRadius: '12px', border: '1px solid #e2e8f0' }} />
+                )}
+              </div>
+            ))}
+            {announcements.length > 3 && (
+              <p style={{ margin: '12px 0 0', fontSize: '13px', color: '#718096' }}>View all announcements in the portal.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="stats-grid">
+        <div className="card">
+          <h2 style={{ margin: '0 0 12px', fontSize: '16px', color: '#1a4d2e' }}>Quick Actions</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <a href="/admin/accounts" className="btn btn-primary" style={{ textDecoration: 'none', justifyContent: 'center' }}>
+              👤 Create Account
+            </a>
+            <a href="/admin/students" className="btn btn-outline" style={{ textDecoration: 'none', justifyContent: 'center' }}>
+              📋 View Students
+            </a>
+            <a href="/admin/attendance" className="btn btn-outline" style={{ textDecoration: 'none', justifyContent: 'center' }}>
+              📝 Student Attendance
+            </a>
+            <a href="/admin/schedule" className="btn btn-outline" style={{ textDecoration: 'none', justifyContent: 'center' }}>
+              📅 Manage Schedule
+            </a>
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 style={{ margin: '0 0 12px', fontSize: '16px', color: '#1a4d2e' }}>System Info</h2>
+          <div style={{ fontSize: '14px', color: '#4a5568', lineHeight: '2' }}>
+            <p style={{ margin: 0 }}><strong>School:</strong> ISPSC Laboratory High School</p>
+            <p style={{ margin: 0 }}><strong>Location:</strong> Tagudin, Ilocos Sur</p>
+            <p style={{ margin: 0 }}><strong>School Year:</strong> {currentSY}</p>
+            <p style={{ margin: 0 }}><strong>Portal Version:</strong> 1.0.0</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AdminDashboard;
